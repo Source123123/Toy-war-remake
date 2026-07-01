@@ -404,7 +404,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a9e7bb39a3e7ef34dadffb9c17979ec5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  buildingSize: {x: 3, y: 3}
+  physicalSize: {x: 1, y: 1}
+  isHalfGridBuilding: 1
 --- !u!4 &1513318014
 Transform:
   m_ObjectHideFlags: 0

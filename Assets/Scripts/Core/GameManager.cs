@@ -4,19 +4,23 @@ public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
 
-    [Header("沙盘数据配置")]
+    [Header("物理沙盘尺寸")]
     public int buildableWidth = 40;     
     public int buildableLength = 100;   
 
+    // 亚网格核心：每个逻辑格子占据物理世界的 0.5 米
+    public const float SUB_GRID_SIZE = 0.5f;
+    
+    // 数据字典容量翻倍：80 x 200
     private int[,] gridData;
-    private GameObject gridPlane; // 真正的物理网格地毯
+    private GameObject gridPlane;
 
     void Awake()
     {
         if (Instance == null) Instance = this;
         else Destroy(gameObject);
 
-        gridData = new int[buildableWidth, buildableLength];
+        gridData = new int[Mathf.RoundToInt(buildableWidth / SUB_GRID_SIZE), Mathf.RoundToInt(buildableLength / SUB_GRID_SIZE)];
     }
 
     void Start()
@@ -29,7 +33,7 @@ public class GameManager : MonoBehaviour
         float centerX = (buildableWidth - 1) / 2f;
         float centerZ = (buildableLength - 1) / 2f;
 
-        // 1. 生成大外围背景
+        // 1. 生成外围背景
         GameObject bgPlane = GameObject.CreatePrimitive(PrimitiveType.Plane);
         bgPlane.transform.localScale = new Vector3(50f, 1f, 50f); 
         bgPlane.transform.position = new Vector3(centerX, -0.6f, centerZ);
@@ -43,68 +47,71 @@ public class GameManager : MonoBehaviour
         tacticalPlane.transform.parent = this.transform;
         tacticalPlane.GetComponent<Renderer>().material.color = new Color(0.5f, 0.75f, 0.4f); 
 
-        // 3. 【架构师黑科技】用代码自动画一张透明的网格地毯！
+        // 3. 画出精美的“双层网格”物理地毯
         CreatePhysicalGridCarpet(centerX, centerZ);
     }
 
     void CreatePhysicalGridCarpet(float centerX, float centerZ)
     {
         gridPlane = GameObject.CreatePrimitive(PrimitiveType.Plane);
-        Destroy(gridPlane.GetComponent<Collider>()); // 去掉碰撞体
+        Destroy(gridPlane.GetComponent<Collider>());
         gridPlane.transform.localScale = new Vector3(buildableWidth / 10f, 1f, buildableLength / 10f);
-        // 关键：贴在草地上面一点点 (-0.49f)，大楼下面，实现完美的遮挡！
         gridPlane.transform.position = new Vector3(centerX, -0.49f, centerZ);
         gridPlane.transform.parent = this.transform;
 
-        // 在内存里画网格图片
-        int pixelsPerCell = 16;
+        int pixelsPerCell = 16; // 1米 = 16像素
         int texWidth = buildableWidth * pixelsPerCell;
         int texHeight = buildableLength * pixelsPerCell;
         Texture2D gridTex = new Texture2D(texWidth, texHeight);
         gridTex.filterMode = FilterMode.Bilinear;
 
-        Color clearColor = new Color(0, 0, 0, 0);       // 完全透明
-        Color lineColor = new Color(1f, 1f, 1f, 0.25f); // 淡淡的白线
+        Color clearColor = new Color(0, 0, 0, 0);
+        Color mainLineColor = new Color(1f, 1f, 1f, 0.3f);  // 主网格：较亮的粗线 (1x1)
+        Color subLineColor = new Color(1f, 1f, 1f, 0.08f);  // 亚网格：非常暗的细线 (0.5x0.5)
 
         Color[] pixels = new Color[texWidth * texHeight];
         for (int y = 0; y < texHeight; y++)
         {
             for (int x = 0; x < texWidth; x++)
             {
-                // 每隔 16 像素画一条线
-                bool isLine = (x % pixelsPerCell == 0 || y % pixelsPerCell == 0);
-                pixels[y * texWidth + x] = isLine ? lineColor : clearColor;
+                bool isMainLine = (x % 16 == 0 || y % 16 == 0);
+                bool isSubLine = (x % 8 == 0 || y % 8 == 0);
+
+                if (isMainLine) pixels[y * texWidth + x] = mainLineColor;
+                else if (isSubLine) pixels[y * texWidth + x] = subLineColor;
+                else pixels[y * texWidth + x] = clearColor;
             }
         }
         gridTex.SetPixels(pixels);
         gridTex.Apply();
 
-        // 贴到地毯上
         Material gridMat = new Material(Shader.Find("Unlit/Transparent"));
         gridMat.mainTexture = gridTex;
         gridPlane.GetComponent<Renderer>().material = gridMat;
-
-        // 游戏一开始，默认关闭网格！
         gridPlane.SetActive(false);
     }
 
-    // --- 对外提供的建造模式开关接口 ---
     public void ToggleGridDisplay(bool show)
     {
         if(gridPlane != null) gridPlane.SetActive(show);
     }
 
-    // --- 数据校验接口保持不变 ---
-    public bool IsAreaAvailable(int startX, int startZ, int width, int length)
+    // --- 基于 0.5 米亚网格的精确校验算法 ---
+    public bool IsAreaAvailablePhysical(float startX, float startZ, float width, float length)
     {
-        for (int x = 0; x < width; x++)
+        int subStartX = Mathf.RoundToInt(startX / SUB_GRID_SIZE);
+        int subStartZ = Mathf.RoundToInt(startZ / SUB_GRID_SIZE);
+        int subWidth = Mathf.RoundToInt(width / SUB_GRID_SIZE);
+        int subLength = Mathf.RoundToInt(length / SUB_GRID_SIZE);
+
+        for (int x = 0; x < subWidth; x++)
         {
-            for (int z = 0; z < length; z++)
+            for (int z = 0; z < subLength; z++)
             {
-                int checkX = startX + x;
-                int checkZ = startZ + z;
+                int checkX = subStartX + x;
+                int checkZ = subStartZ + z;
                 
-                if (checkX < 0 || checkX >= buildableWidth || checkZ < 0 || checkZ >= buildableLength)
+                if (checkX < 0 || checkX >= gridData.GetLength(0) || checkZ < 0 || checkZ >= gridData.GetLength(1))
                     return false;
                 
                 if (gridData[checkX, checkZ] != 0)
@@ -114,10 +121,15 @@ public class GameManager : MonoBehaviour
         return true;
     }
 
-    public void MarkAreaOccupied(int startX, int startZ, int width, int length)
+    public void MarkAreaOccupiedPhysical(float startX, float startZ, float width, float length)
     {
-        for (int x = 0; x < width; x++)
-            for (int z = 0; z < length; z++)
-                gridData[startX + x, startZ + z] = 1;
+        int subStartX = Mathf.RoundToInt(startX / SUB_GRID_SIZE);
+        int subStartZ = Mathf.RoundToInt(startZ / SUB_GRID_SIZE);
+        int subWidth = Mathf.RoundToInt(width / SUB_GRID_SIZE);
+        int subLength = Mathf.RoundToInt(length / SUB_GRID_SIZE);
+
+        for (int x = 0; x < subWidth; x++)
+            for (int z = 0; z < subLength; z++)
+                gridData[subStartX + x, subStartZ + z] = 1;
     }
 }
